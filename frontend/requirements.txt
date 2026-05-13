@@ -1,0 +1,14 @@
+# Frontend dependencies (Node.js / npm)
+# Install with: npm install
+# Requires Node.js >= 18
+
+# Runtime
+react==18.3.1
+react-dom==18.3.1
+react-router-dom==6.30.3
+@monaco-editor/react==4.7.0
+axios==1.16.0
+
+# Dev / build
+vite==5.4.21
+@vitejs/plugin-react==4.7.0

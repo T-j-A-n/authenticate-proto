@@ -1,0 +1,83 @@
+{
+  "id": "stack_001",
+  "title": "Implement a Stack",
+  "description": "Implement a `Stack` class that supports the following operations:\n\n- `push(item)` — Add an item to the top of the stack.\n- `pop()` — Remove and return the top item. Raise `IndexError` if empty.\n- `peek()` — Return the top item without removing it. Raise `IndexError` if empty.\n- `is_empty()` — Return `True` if the stack is empty, `False` otherwise.\n- `size()` — Return the number of items in the stack.",
+  "starter_code": "class Stack:\n    def __init__(self):\n        pass\n\n    def push(self, item):\n        pass\n\n    def pop(self):\n        pass\n\n    def peek(self):\n        pass\n\n    def is_empty(self):\n        pass\n\n    def size(self):\n        pass",
+  "language": "python",
+  "visible_tests": [
+    {
+      "name": "push_and_peek",
+      "setup": "s = Stack()\ns.push(42)",
+      "call": "s.peek()",
+      "expected": "42"
+    },
+    {
+      "name": "push_and_pop",
+      "setup": "s = Stack()\ns.push(1)\ns.push(2)",
+      "call": "s.pop()",
+      "expected": "2"
+    },
+    {
+      "name": "is_empty_true",
+      "setup": "s = Stack()",
+      "call": "s.is_empty()",
+      "expected": "True"
+    },
+    {
+      "name": "size_after_pushes",
+      "setup": "s = Stack()\ns.push('a')\ns.push('b')\ns.push('c')",
+      "call": "s.size()",
+      "expected": "3"
+    }
+  ],
+  "hidden_tests": [
+    {
+      "name": "pop_order",
+      "setup": "s = Stack()\nfor i in range(5): s.push(i)",
+      "call": "[s.pop() for _ in range(5)]",
+      "expected": "[4, 3, 2, 1, 0]"
+    },
+    {
+      "name": "pop_empty_raises",
+      "setup": "s = Stack()",
+      "call": "s.pop()",
+      "expected": "IndexError"
+    },
+    {
+      "name": "peek_empty_raises",
+      "setup": "s = Stack()",
+      "call": "s.peek()",
+      "expected": "IndexError"
+    },
+    {
+      "name": "size_after_pop",
+      "setup": "s = Stack()\ns.push(1)\ns.push(2)\ns.pop()",
+      "call": "s.size()",
+      "expected": "1"
+    },
+    {
+      "name": "mixed_operations",
+      "setup": "s = Stack()\ns.push(10)\ns.push(20)\ns.pop()\ns.push(30)",
+      "call": "s.peek()",
+      "expected": "30"
+    }
+  ],
+  "expected_complexity": "O(1)",
+  "docs_allowlist": ["https://docs.python.org"],
+  "comprehension_questions": [
+    "Explain why your push() and pop() methods have O(1) time complexity. What property of Python lists makes this possible?",
+    "What would happen to your implementation if two threads called push() simultaneously? Describe the potential problem and how you would fix it.",
+    "If you replaced your underlying data structure with a linked list, which operations would change in complexity and why?"
+  ],
+  "extension": {
+    "description": "Make your Stack thread-safe using `threading.Lock`. Both push() and pop() should acquire the lock before modifying the internal data structure.",
+    "additional_tests": [
+      {
+        "name": "thread_safety",
+        "setup": "import threading\ns = Stack()\ndef push_many():\n    for i in range(1000): s.push(i)\nthreads = [threading.Thread(target=push_many) for _ in range(4)]\nfor t in threads: t.start()\nfor t in threads: t.join()",
+        "call": "s.size()",
+        "expected": "4000"
+      }
+    ]
+  }
+}
