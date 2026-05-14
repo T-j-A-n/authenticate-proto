@@ -1,0 +1,9 @@
+name: GazeTracking
+channels:
+  - conda-forge
+  - anaconda
+  - defaults
+dependencies:
+  - numpy == 2.4.4
+  - opencv == 4.13.*
+  - dlib == 20.0.*

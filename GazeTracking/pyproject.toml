@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=78", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gaze-tracking"
+version = "0.1.0"
+description = "Webcam-based eye tracking system that provides pupil position and gaze direction in real time."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Antoine Lamé" }]
+requires-python = ">=3.10"
+keywords = ["gaze", "eye-tracking", "computer-vision", "opencv", "dlib"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+dependencies = [
+    "dlib>=20.0",
+    "numpy>=2.0",
+    "opencv-python>=4.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/antoinelame/GazeTracking"
+Repository = "https://github.com/antoinelame/GazeTracking"
+Issues = "https://github.com/antoinelame/GazeTracking/issues"
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.7",
+    "pytest>=8.0",
+]
+
+[tool.setuptools]
+packages = ["gaze_tracking"]
+
+[tool.setuptools.package-data]
+gaze_tracking = ["trained_models/*.dat"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
