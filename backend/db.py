@@ -46,6 +46,25 @@ class KeystrokeWindow(Base):
     window_data = Column(Text, nullable=True)
 
 
+class GazeEvent(Base):
+    __tablename__ = "gaze_events"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, ForeignKey("sessions.id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    event_type = Column(String, nullable=False)  # 'off-screen', 'on-screen-return'
+    event_data = Column(Text, nullable=True)  # JSON with x, y, duration
+
+
+class PasteEvent(Base):
+    __tablename__ = "paste_events"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, ForeignKey("sessions.id"), nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    paste_length = Column(Integer, nullable=False)
+    paste_content_preview = Column(Text, nullable=True)
+    paste_source = Column(String, nullable=True)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
 

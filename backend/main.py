@@ -8,14 +8,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
-from db import init_db, get_db, Session, Snapshot, KeystrokeWindow
-import typenet_dummy
+from db import init_db, get_db, Session, Snapshot, KeystrokeWindow, GazeEvent, PasteEvent
+import typenet_model
+from keystroke_processor import KeystrokeProcessor
 from runner import run_code
 from evaluator import profile_complexity, check_quality, compute_scores
 from integrity import compute_diff, compute_anomaly_score
 
 import json as _json
 import os
+import numpy as np
 
 app = FastAPI(title="AUTHENTICATE")
 
@@ -27,10 +29,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Track keystroke processors for each session
+_keystroke_processors = {}
+
 
 @app.on_event("startup")
 def startup():
     init_db()
+    # Initialize TypeNet model
+    typenet_model.get_model()
 
 
 PROBLEMS_DIR = os.path.join(os.path.dirname(__file__), "problems")
@@ -117,10 +124,25 @@ def enroll(body: EnrollBody, db: DBSession = Depends(get_db)):
     session = db.query(Session).filter(Session.id == body.session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    baseline = typenet_dummy.enroll(body.keystroke_sequences)
+    
+    # Convert keystroke sequences from 4-feature to 5-feature format
+    converted_sequences = []
+    for sequence in body.keystroke_sequences:
+        converted_sequence = []
+        for keystroke in sequence:
+            converted_keystroke = KeystrokeProcessor.convert_keystroke_data(keystroke)
+            converted_sequence.append(converted_keystroke)
+        converted_sequences.append(converted_sequence)
+    
+    # Use real TypeNet model for enrollment
+    baseline = typenet_model.enroll(converted_sequences)
     session.enrolled_embedding = json.dumps(baseline.tolist())
     db.commit()
-    return {"success": True}
+    
+    return {
+        "success": True,
+        "message": f"Enrolled with {len(body.keystroke_sequences)} keystroke windows"
+    }
 
 
 # ── Problem ───────────────────────────────────────────────────────────────────
@@ -232,6 +254,90 @@ def snapshot(body: SnapshotBody, db: DBSession = Depends(get_db)):
     return {"snapshot_id": snap.id, "diff_lines": snap.diff_lines}
 
 
+# ── Keystroke collection and continuous monitoring ─────────────────────────────
+
+class KeystrokeBody(BaseModel):
+    session_id: str
+    hold_time_ms: float
+    iki_kd_ms: float
+    iki_ku_ms: float
+    key_code: int
+
+
+@app.post("/api/keystroke")
+def add_keystroke(body: KeystrokeBody, db: DBSession = Depends(get_db)):
+    """
+    Add a single keystroke for enrollment or continuous monitoring.
+    
+    Enrollment phase: collect 100 keystrokes, then auto-enroll
+    Monitoring phase: collect into 50-keystroke windows for anomaly detection
+    """
+    session = db.query(Session).filter(Session.id == body.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get or create keystroke processor for this session
+    if body.session_id not in _keystroke_processors:
+        _keystroke_processors[body.session_id] = KeystrokeProcessor()
+    
+    processor = _keystroke_processors[body.session_id]
+    
+    # Add keystroke and check status
+    result = processor.add_keystroke(
+        body.hold_time_ms,
+        body.iki_kd_ms,
+        body.iki_ku_ms,
+        body.key_code
+    )
+    
+    response = {
+        "status": result['status'],
+        "keystroke_count": result['keystroke_count'],
+        "enrollment_complete": processor.enrollment_complete
+    }
+    
+    # Check if enrollment is ready
+    if result['status'] == 'enrollment_ready' and result['enrollment_windows']:
+        # Auto-enroll with the collected windows (convert features)
+        try:
+            converted_windows = []
+            for window in result['enrollment_windows']:
+                converted_window = []
+                for keystroke in window:
+                    converted_keystroke = KeystrokeProcessor.convert_keystroke_data(keystroke)
+                    converted_window.append(converted_keystroke)
+                converted_windows.append(converted_window)
+            
+            baseline = typenet_model.enroll(converted_windows)
+            session.enrolled_embedding = json.dumps(baseline.tolist())
+            db.commit()
+            response['message'] = 'Enrollment complete'
+            response['enrollment_windows_count'] = len(result['enrollment_windows'])
+        except Exception as e:
+            response['error'] = str(e)
+    
+    # Check if we have a monitoring window ready
+    if result['status'] == 'window_ready' and result['window']:
+        if session.enrolled_embedding:
+            baseline = np.array(json.loads(session.enrolled_embedding), dtype=np.float32)
+            # Convert window features
+            converted_window = []
+            for keystroke in result['window']:
+                converted_keystroke = KeystrokeProcessor.convert_keystroke_data(keystroke)
+                converted_window.append(converted_keystroke)
+            score = typenet_model.score_window(converted_window, baseline)
+            threshold = 0.5
+            is_suspicious = score < threshold
+            
+            response['monitoring'] = {
+                'similarity_score': float(score),
+                'is_suspicious': is_suspicious,
+                'threshold': threshold
+            }
+    
+    return response
+
+
 class KeystrokeWindowBody(BaseModel):
     session_id: str
     window_data: list[list[float]]
@@ -243,15 +349,31 @@ def keystroke_window(body: KeystrokeWindowBody, db: DBSession = Depends(get_db))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Get baseline embedding
     if session.enrolled_embedding:
-        import numpy as np
         baseline = np.array(json.loads(session.enrolled_embedding), dtype=np.float32)
     else:
-        import numpy as np
-        baseline = typenet_dummy.model.dummy_embedding
+        # No enrollment yet, return neutral score
+        return {
+            "similarity_score": 0.5,
+            "is_suspicious": False,
+            "message": "Enrollment not complete"
+        }
 
-    score = typenet_dummy.score_window(body.window_data, baseline)
+    # Convert 4-feature keystroke data to 5-feature format
+    converted_window = []
+    for keystroke in body.window_data:
+        converted_keystroke = KeystrokeProcessor.convert_keystroke_data(keystroke)
+        converted_window.append(converted_keystroke)
 
+    # Compute similarity using real TypeNet model
+    score = typenet_model.score_window(converted_window, baseline)
+    
+    # Determine if suspicious (below threshold)
+    threshold = 0.5  # Tunable threshold
+    is_suspicious = score < threshold
+    
+    # Store window record
     kw = KeystrokeWindow(
         session_id=body.session_id,
         timestamp=datetime.utcnow(),
@@ -261,7 +383,68 @@ def keystroke_window(body: KeystrokeWindowBody, db: DBSession = Depends(get_db))
     db.add(kw)
     db.commit()
 
-    return {"similarity_score": score}
+    return {
+        "similarity_score": score,
+        "is_suspicious": is_suspicious,
+        "threshold": threshold,
+        "message": "suspicious activity detected" if is_suspicious else "activity normal"
+    }
+
+
+# ── Gaze events ───────────────────────────────────────────────────────────────
+
+class GazeEventBody(BaseModel):
+    session_id: str
+    event_type: str
+    event_data: dict
+    timestamp: str
+
+
+@app.post("/api/gaze-event")
+def gaze_event(body: GazeEventBody, db: DBSession = Depends(get_db)):
+    session = db.query(Session).filter(Session.id == body.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Store gaze event
+    gaze = GazeEvent(
+        session_id=body.session_id,
+        event_type=body.event_type,
+        event_data=json.dumps(body.event_data),
+    )
+    db.add(gaze)
+    db.commit()
+    
+    return {"success": True, "event_type": body.event_type}
+
+
+# ── Paste events ──────────────────────────────────────────────────────────────
+
+class PasteEventBody(BaseModel):
+    session_id: str
+    paste_length: int
+    paste_content_preview: str
+    paste_source: str
+    timestamp: str
+
+
+@app.post("/api/paste-event")
+def paste_event(body: PasteEventBody, db: DBSession = Depends(get_db)):
+    session = db.query(Session).filter(Session.id == body.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Store paste event
+    paste = PasteEvent(
+        session_id=body.session_id,
+        paste_length=body.paste_length,
+        paste_content_preview=body.paste_content_preview,
+        paste_source=body.paste_source,
+    )
+    db.add(paste)
+    db.commit()
+    
+    return {"success": True, "paste_length": body.paste_length}
 
 
 # ── Approach journal ──────────────────────────────────────────────────────────
@@ -349,6 +532,18 @@ def timeline(session_id: str, db: DBSession = Depends(get_db)):
         .order_by(KeystrokeWindow.timestamp)
         .all()
     )
+    gaze_events = (
+        db.query(GazeEvent)
+        .filter(GazeEvent.session_id == session_id)
+        .order_by(GazeEvent.timestamp)
+        .all()
+    )
+    paste_events = (
+        db.query(PasteEvent)
+        .filter(PasteEvent.session_id == session_id)
+        .order_by(PasteEvent.timestamp)
+        .all()
+    )
 
     started = session.started_at
 
@@ -373,6 +568,27 @@ def timeline(session_id: str, db: DBSession = Depends(get_db)):
                 "similarity_score": w.similarity_score,
             }
             for w in windows
+        ],
+        "gaze_events": [
+            {
+                "id": g.id,
+                "timestamp": g.timestamp.isoformat(),
+                "elapsed_seconds": int((g.timestamp - started).total_seconds()) if started else None,
+                "event_type": g.event_type,
+                "event_data": json.loads(g.event_data) if g.event_data else {},
+            }
+            for g in gaze_events
+        ],
+        "paste_events": [
+            {
+                "id": p.id,
+                "timestamp": p.timestamp.isoformat(),
+                "elapsed_seconds": int((p.timestamp - started).total_seconds()) if started else None,
+                "paste_length": p.paste_length,
+                "paste_content_preview": p.paste_content_preview,
+                "paste_source": p.paste_source,
+            }
+            for p in paste_events
         ],
         "approach_journal": session.approach_journal,
         "comprehension_answers": json.loads(session.comprehension_answers) if session.comprehension_answers else None,
