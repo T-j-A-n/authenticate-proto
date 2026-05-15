@@ -11,4 +11,3 @@ gaze_tracking.egg-info/SOURCES.txt
 gaze_tracking.egg-info/dependency_links.txt
 gaze_tracking.egg-info/requires.txt
 gaze_tracking.egg-info/top_level.txt
-gaze_tracking/trained_models/shape_predictor_68_face_landmarks.dat
